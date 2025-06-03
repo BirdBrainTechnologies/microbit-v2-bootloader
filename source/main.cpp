@@ -112,7 +112,7 @@ uint8_t send_verify()
 void send_erase()
 {
 	//uint8_t received_value = 0;
-    uint8_t count = 0;
+    //uint8_t count = 0;
     serial.sendChar(ERASE_COMMAND, SYNC_SLEEP);
     //received_value = serial.read(SYNC_SLEEP);
 
@@ -304,7 +304,149 @@ void program_flash()
 	}
 	program_flash_last_block(rem_blocks);
 }
+
+
 /*******************************************************************/
+//Puts SAMD into verification mode
+/*******************************************************************/
+void send_verify_flash()
+{
+    
+    serial.sendChar(VERIFY_FLASH_COMMAND, SYNC_SLEEP);
+}
+
+
+
+/*******************************************************************/
+//Send Verify command and receive 64 bytes of data at a time
+/*******************************************************************/
+void verify_flash_block()
+{
+	  uint8_t return_value = 0;
+	  //uint8_t received_value[2];
+	  
+	  uint16_t block_size = 0;
+//	  uint16_t NO_blocks  = 0;
+//	  uint16_t rem_blocks = 0; 
+		
+	  uint16_t  i          = 0;
+	  block_size = SAMD10_BLOCK_SIZE; 
+	  //Send verify command
+		send_verify_flash();
+        return_value = serial.read(SYNC_SLEEP);
+		//Wait for ackownledgment
+		check_confirm(return_value);
+		for(i=0;i<block_size;i++)
+		{
+			//Read 64 bytes received and compare it against the Prog memory variables which is used in programming
+			return_value = serial.read(SYNC_SLEEP);
+			if(return_value != PROG_MEMORY[count_data] )
+			{
+				wrong_LEDarray();
+			}
+			count_data++;
+            nrf_delay_ms(1); // Probably be a bug, but the program does not copy properly if there is no delay between character sends
+		}
+        clear_buffer();
+		
+}
+/*******************************************************************/
+
+/*******************************************************************/
+//Send verification 
+//Send the left over bytes over UART and verify them
+/*******************************************************************/
+void verify_flash_last_block(uint8_t rem_block_data)
+{
+	  uint8_t return_value = 0;
+	  //uint8_t received_value[2];
+	  uint16_t block_size = 0;
+	  uint16_t  i          = 0;
+	  block_size = SAMD10_BLOCK_SIZE;
+	  
+	  //similar to generic verify block but here we stop with few bytes in the last block
+		send_verify_flash();
+        return_value = serial.read(SYNC_SLEEP);
+		check_confirm(return_value);
+		for(i=0;i<rem_block_data;i++)
+		{
+			return_value = serial.read(SYNC_SLEEP);
+			if(return_value != PROG_MEMORY[count_data] )
+			{
+				wrong_LEDarray();
+			}
+			count_data++;
+            nrf_delay_ms(1); // Probably be a bug, but the program does not copy properly if there is no delay between character sends
+			
+		}
+		//Reamining bytes to complete the block size
+		for(i=rem_block_data;i<block_size;i++)
+		{
+			//Check if the block values are 0xFF , which should be that as we erased initially
+			return_value = serial.read(SYNC_SLEEP);
+			if(return_value != 0xff )
+			{
+				wrong_LEDarray();
+			}
+			count_data++;
+            nrf_delay_ms(1); // Probably be a bug, but the program does not copy properly if there is no delay between character sends
+		}
+        clear_buffer();
+}
+
+/*******************************************************************/
+//Verify flash 
+//Read 64 bytes at a time that is the page size of SAMD Flash
+//Update the LED Matrix with the progress
+//At the end if you have any extra bytes fill it at the end
+/*******************************************************************/
+void verify_flash()
+{
+	uint32_t program_size = sizeof(PROG_MEMORY);
+    uint16_t NO_blocks  = 0;
+	uint16_t rem_blocks = 0;
+	uint16_t  i 				  =	0;	
+	uint8_t  LED_update = 0;
+    uint8_t  led_count  = 0;
+
+	NO_blocks  = program_size/64;
+	rem_blocks = program_size%64;
+	count_data = 0;
+	LED_update = NO_blocks/NO_LED_ROWS; //Each LED represnts certain number of blocks being verified
+    
+	for(i=0;i<NO_blocks;i++)
+	{
+		//read each block
+		verify_flash_block();
+		//Update the LED screen every time certain number of blocks have been verified
+		if(i%LED_update == 0 )
+		{
+			if(led_count == 0)
+            {
+                uBit.display.print(row1img);
+            }
+			else if(led_count == 1)
+            {
+                uBit.display.print(row2img);
+            }
+			else if(led_count == 2)
+            {
+                uBit.display.print(row3img);
+            }
+			else if(led_count == 3)
+            {
+                uBit.display.print(row4img);
+            }
+			else if(led_count == 4)
+            {
+                uBit.display.print(row5img);
+            }
+            led_count++;
+		}
+	}
+	//Last few bytes which are less than 64 bytes
+	verify_flash_last_block(rem_blocks);
+}
 
 int main()
 {
@@ -325,14 +467,20 @@ int main()
 
     // Erase the current program
     send_erase();
-        
+    uBit.display.print('E');
+    uBit.sleep(1000);       
     // Print P and enter programming mode
     uBit.display.print('P');
     uBit.sleep(1000);
     program_flash();
+    // Got into verify mode
+   // uBit.display.print('V');
 
+   // uBit.sleep(1000);
     // Old V1 code would verify that we programmed things correctly - but we no longer check since it seems to pretty much always work
 
+	//read the data page by page
+	//verify_flash();
     uBit.display.print(check);
     uBit.sleep(1000);
     reset_controller();
